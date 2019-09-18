@@ -156,17 +156,17 @@ static bool is_configuration_valid(const uint8_t *config_buffer, uint8_t config_
 static uint8_t default_bitpool(uint8_t freq, uint8_t mode) {
     /* These bitpool values were chosen based on the A2DP spec recommendation */
     switch (freq) {
-        case SBC_SAMPLING_FREQ_16000:
-        case SBC_SAMPLING_FREQ_32000:
+        case SBC_SAMPLING_FREQ_48000:
             switch (mode) {
                 case SBC_CHANNEL_MODE_MONO:
                 case SBC_CHANNEL_MODE_DUAL_CHANNEL:
+                    return SBC_BITPOOL_HQ_MONO_48000;
+
                 case SBC_CHANNEL_MODE_STEREO:
                 case SBC_CHANNEL_MODE_JOINT_STEREO:
-                    return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
+                    return SBC_BITPOOL_HQ_JOINT_STEREO_48000;
             }
             break;
-
         case SBC_SAMPLING_FREQ_44100:
             switch (mode) {
                 case SBC_CHANNEL_MODE_MONO:
@@ -178,16 +178,14 @@ static uint8_t default_bitpool(uint8_t freq, uint8_t mode) {
                     return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
             }
             break;
-
-        case SBC_SAMPLING_FREQ_48000:
+        case SBC_SAMPLING_FREQ_16000:
+        case SBC_SAMPLING_FREQ_32000:
             switch (mode) {
                 case SBC_CHANNEL_MODE_MONO:
                 case SBC_CHANNEL_MODE_DUAL_CHANNEL:
-                    return SBC_BITPOOL_HQ_MONO_48000;
-
                 case SBC_CHANNEL_MODE_STEREO:
                 case SBC_CHANNEL_MODE_JOINT_STEREO:
-                    return SBC_BITPOOL_HQ_JOINT_STEREO_48000;
+                    return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
             }
             break;
     }
@@ -254,12 +252,12 @@ static uint8_t fill_preferred_configuration(const pa_sample_spec *default_sample
             return 0;
         }
     } else {
-        if (capabilities->channel_mode & SBC_CHANNEL_MODE_JOINT_STEREO)
-            config->channel_mode = SBC_CHANNEL_MODE_JOINT_STEREO;
+        if (capabilities->channel_mode & SBC_CHANNEL_MODE_DUAL_CHANNEL)
+            config->channel_mode = SBC_CHANNEL_MODE_DUAL_CHANNEL;
         else if (capabilities->channel_mode & SBC_CHANNEL_MODE_STEREO)
             config->channel_mode = SBC_CHANNEL_MODE_STEREO;
-        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_DUAL_CHANNEL)
-            config->channel_mode = SBC_CHANNEL_MODE_DUAL_CHANNEL;
+        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_JOINT_STEREO)
+            config->channel_mode = SBC_CHANNEL_MODE_JOINT_STEREO;
         else if (capabilities->channel_mode & SBC_CHANNEL_MODE_MONO)
             config->channel_mode = SBC_CHANNEL_MODE_MONO;
         else {
@@ -343,31 +341,27 @@ static void *init(bool for_encoding, bool for_backchannel, const uint8_t *config
     sample_spec->format = PA_SAMPLE_S16LE;
 
     switch (config->frequency) {
-        case SBC_SAMPLING_FREQ_16000:
-            sbc_info->frequency = SBC_FREQ_16000;
-            sample_spec->rate = 16000U;
-            break;
-        case SBC_SAMPLING_FREQ_32000:
-            sbc_info->frequency = SBC_FREQ_32000;
-            sample_spec->rate = 32000U;
+        case SBC_SAMPLING_FREQ_48000:
+            sbc_info->frequency = SBC_FREQ_48000;
+            sample_spec->rate = 48000U;
             break;
         case SBC_SAMPLING_FREQ_44100:
             sbc_info->frequency = SBC_FREQ_44100;
             sample_spec->rate = 44100U;
             break;
-        case SBC_SAMPLING_FREQ_48000:
-            sbc_info->frequency = SBC_FREQ_48000;
-            sample_spec->rate = 48000U;
+        case SBC_SAMPLING_FREQ_32000:
+            sbc_info->frequency = SBC_FREQ_32000;
+            sample_spec->rate = 32000U;
+            break;
+        case SBC_SAMPLING_FREQ_16000:
+            sbc_info->frequency = SBC_FREQ_16000;
+            sample_spec->rate = 16000U;
             break;
         default:
             pa_assert_not_reached();
     }
 
     switch (config->channel_mode) {
-        case SBC_CHANNEL_MODE_MONO:
-            sbc_info->mode = SBC_MODE_MONO;
-            sample_spec->channels = 1;
-            break;
         case SBC_CHANNEL_MODE_DUAL_CHANNEL:
             sbc_info->mode = SBC_MODE_DUAL_CHANNEL;
             sample_spec->channels = 2;
@@ -380,16 +374,20 @@ static void *init(bool for_encoding, bool for_backchannel, const uint8_t *config
             sbc_info->mode = SBC_MODE_JOINT_STEREO;
             sample_spec->channels = 2;
             break;
+        case SBC_CHANNEL_MODE_MONO:
+            sbc_info->mode = SBC_MODE_MONO;
+            sample_spec->channels = 1;
+            break;
         default:
             pa_assert_not_reached();
     }
 
     switch (config->allocation_method) {
-        case SBC_ALLOCATION_SNR:
-            sbc_info->allocation = SBC_AM_SNR;
-            break;
         case SBC_ALLOCATION_LOUDNESS:
             sbc_info->allocation = SBC_AM_LOUDNESS;
+            break;
+        case SBC_ALLOCATION_SNR:
+            sbc_info->allocation = SBC_AM_SNR;
             break;
         default:
             pa_assert_not_reached();
