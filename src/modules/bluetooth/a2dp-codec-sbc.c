@@ -159,10 +159,11 @@ static uint8_t default_bitpool(uint8_t freq, uint8_t mode) {
         case SBC_SAMPLING_FREQ_48000:
             switch (mode) {
                 case SBC_CHANNEL_MODE_MONO:
+				    return SBC_BITPOOL_MQ_MONO_48000;
                 case SBC_CHANNEL_MODE_DUAL_CHANNEL:
                     return SBC_BITPOOL_HQ_MONO_48000;
-
                 case SBC_CHANNEL_MODE_STEREO:
+                    return SBC_BITPOOL_HQ_JOINT_STEREO_48000;
                 case SBC_CHANNEL_MODE_JOINT_STEREO:
                     return SBC_BITPOOL_HQ_JOINT_STEREO_48000;
             }
@@ -170,20 +171,35 @@ static uint8_t default_bitpool(uint8_t freq, uint8_t mode) {
         case SBC_SAMPLING_FREQ_44100:
             switch (mode) {
                 case SBC_CHANNEL_MODE_MONO:
+                    return SBC_BITPOOL_MQ_MONO_44100;
                 case SBC_CHANNEL_MODE_DUAL_CHANNEL:
                     return SBC_BITPOOL_HQ_MONO_44100;
-
                 case SBC_CHANNEL_MODE_STEREO:
+                    return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
+                case SBC_CHANNEL_MODE_JOINT_STEREO:
+                    return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
+            }
+            break;
+        case SBC_SAMPLING_FREQ_32000:
+            switch (mode) {
+                case SBC_CHANNEL_MODE_MONO:
+                    return SBC_BITPOOL_MQ_MONO_44100;
+                case SBC_CHANNEL_MODE_DUAL_CHANNEL:
+                    return SBC_BITPOOL_HQ_MONO_44100;
+                case SBC_CHANNEL_MODE_STEREO:
+                    return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
                 case SBC_CHANNEL_MODE_JOINT_STEREO:
                     return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
             }
             break;
         case SBC_SAMPLING_FREQ_16000:
-        case SBC_SAMPLING_FREQ_32000:
             switch (mode) {
                 case SBC_CHANNEL_MODE_MONO:
+                    return SBC_BITPOOL_MQ_MONO_44100;
                 case SBC_CHANNEL_MODE_DUAL_CHANNEL:
+                    return SBC_BITPOOL_HQ_MONO_44100;
                 case SBC_CHANNEL_MODE_STEREO:
+                    return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
                 case SBC_CHANNEL_MODE_JOINT_STEREO:
                     return SBC_BITPOOL_HQ_JOINT_STEREO_44100;
             }
