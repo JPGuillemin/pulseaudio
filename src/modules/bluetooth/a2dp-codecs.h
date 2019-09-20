@@ -54,22 +54,19 @@
 #define SBC_ALLOCATION_LOUDNESS		1
 
 #define SBC_MIN_BITPOOL			2
-#define SBC_MAX_BITPOOL			250
 
-/* Other settings:
- * Block length = 16
- * Allocation method = Loudness
- * Subbands = 8
+/* This max bitpool value is used for SBC_CHANNEL_MODE_MONO mode and SBC_CHANNEL_MODE_DUAL_CHANNEL stereo mode, 
+ * and can achieve SBC XQ quality in SBC_CHANNEL_MODE_DUAL_CHANNEL stereo mode if the device supports it.
+ * The actual bitpool is negociated during connexion. We don't used fixed capabilities, so the device cap is never exceeded.
  */
+#define SBC_MAX_BITPOOL_1_CHANNEL	47
 
-#define SBC_BITPOOL_MQ_MONO_44100		19
-#define SBC_BITPOOL_MQ_MONO_48000		19
-#define SBC_BITPOOL_MQ_JOINT_STEREO_44100	35
-#define SBC_BITPOOL_MQ_JOINT_STEREO_48000	35
-#define SBC_BITPOOL_HQ_MONO_44100		38
-#define SBC_BITPOOL_HQ_MONO_48000		38
-#define SBC_BITPOOL_HQ_JOINT_STEREO_44100	76
-#define SBC_BITPOOL_HQ_JOINT_STEREO_48000	76
+/* This max bitpool value is the safe value for SBC_CHANNEL_MODE_JOINT_STEREO mode and SBC_CHANNEL_MODE_STEREO mode,
+ * and can achieve SBC XQ quality in SBC_CHANNEL_MODE_JOINT_STEREO mode if the device supports it.
+ * The actual bitpool is negociated during connexion. We don't used fixed capabilities, so the device cap is never exceeded.
+ */
+#define SBC_MAX_BITPOOL_2_CHANNELS	94
+
 
 #define MPEG_CHANNEL_MODE_MONO		(1 << 3)
 #define MPEG_CHANNEL_MODE_DUAL_CHANNEL	(1 << 2)
