@@ -2,6 +2,7 @@
   This file is part of PulseAudio.
 
   Copyright 2018-2019 Pali Rohár <pali.rohar@gmail.com>
+  Copyright 2019 Jean-Philippe Guillemin <h1p8r10n@yandex.com>
 
   PulseAudio is free software; you can redistribute it and/or modify
   it under the terms of the GNU Lesser General Public License as
@@ -36,8 +37,57 @@
 #include "a2dp-codec-api.h"
 #include "rtp.h"
 
-#define SBC_BITPOOL_DEC_LIMIT 32
-#define SBC_BITPOOL_DEC_STEP 5
+#define SBC_BITPOOL_DEC_LIMIT   10
+#define SBC_BITPOOL_DEC_STEP    2
+
+/* 
++-------------------------+-----------+-------+-----------+-------+
+|  Bluetooth speed EDR    | EDR 2Mbps |       | EDR 3Mbps |       |
++-------------------------+-----------+-------+-----------+-------+
+| Speed (b/s)             |   2097152 |       |   3145728 |       |
+| Radio slot length (s)   |  0.000625 |       |  0.000625 |       |
+| Radio slots / s         |      1600 |       |      1600 |       |
+| Slot size (B)           |    163.84 |       |    245.76 |       |
+| Max payload/5 slots (B) |     676.2 |       |    1085.8 |       |
+| max bitrate (Kb/s)      |   1408.75 |       |   2262.08 |       |
++-------------------------+-----------+-------+-----------+-------+
+
++-------------------------+-----------+-------+-----------+-------+
+| sampling Freq (Hz)      |     44100 | 48000 |     44100 | 48000 |
+| bitpool / channel       |        38 |    38 |        47 |    47 |
+| Frame length DUAL (B)   |       164 |   164 |       200 |   200 |
+| Frame length JST (B)    |       165 |   165 |       201 |   201 |
+| Frame length ST (B)     |       164 |   164 |       200 |   200 |
+| bitrate DUAL CH (kb/s)  |   452.025 |   492 |    551.25 |   600 |
+| bitrate JOINT ST (kb/s) | 454.78125 |   495 | 554.00625 |   603 |
+| bitrate STEREO (kb/s)   |   452.025 |   492 |    551.25 |   600 |
++-------------------------+-----------+-------+-----------+-------+
+*/
+
+/*
+ * We don't want the frames to be fragmented to preserve latency : so a 
+ * frame should fit into a radio slot. Sampling freq has no impact on 
+ * frame size, and resulting bitrate never exceed BT max capacity at 
+ * 2Mbps : so Sample frequency doesn't need specific bitpool reduction
+ */
+
+/* This max bitpool value is used for SBC_CHANNEL_MODE_MONO.
+*/
+#define SBC_MAX_BITPOOL_MONO	38
+
+/* This max bitpool (per channel) value is used for SBC_CHANNEL_MODE_DUAL_CHANNEL 
+ * stereo mode, and can achieve SBC XQ quality if the device supports it. The 
+ * actual bitpool is negociated during connexion. We don't used fixed capabilities, 
+ * so the device cap is never exceeded.
+*/
+#define SBC_MAX_BITPOOL_DUAL_CHANNEL	38
+
+/* This max bitpool (2 channels) value is used for SBC_CHANNEL_MODE_JOINT_STEREO 
+ * mode and SBC_CHANNEL_MODE_STEREO mode, and can achieve SBC XQ quality in both 
+ * modes if the device supports it. The final bitpool is always negociated during 
+ * connexion. We don't used fixed capabilities, so the device cap is never exceeded.
+ */
+#define SBC_MAX_BITPOOL_STEREO	94
 
 struct sbc_info {
     sbc_t sbc;                           /* Codec data */
@@ -104,7 +154,7 @@ static uint8_t fill_capabilities(uint8_t capabilities_buffer[MAX_A2DP_CAPS_SIZE]
     capabilities->subbands = SBC_SUBBANDS_4 | SBC_SUBBANDS_8;
     capabilities->block_length = SBC_BLOCK_LENGTH_4 | SBC_BLOCK_LENGTH_8 | SBC_BLOCK_LENGTH_12 | SBC_BLOCK_LENGTH_16;
     capabilities->min_bitpool = SBC_MIN_BITPOOL;
-    capabilities->max_bitpool = SBC_MAX_BITPOOL_2_CHANNELS;
+    capabilities->max_bitpool = SBC_MAX_BITPOOL_STEREO;
 
     return sizeof(*capabilities);
 }
@@ -154,18 +204,18 @@ static bool is_configuration_valid(const uint8_t *config_buffer, uint8_t config_
 }
 
 static uint8_t default_bitpool(uint8_t freq, uint8_t mode) {
-    /* These bitpool values were chosen based on the A2DP spec recommendation */
-
-	switch (mode) {
-		case SBC_CHANNEL_MODE_DUAL_CHANNEL:
-			return SBC_MAX_BITPOOL_1_CHANNEL;
-		case SBC_CHANNEL_MODE_JOINT_STEREO:
-			return SBC_MAX_BITPOOL_2_CHANNELS;
-		case SBC_CHANNEL_MODE_STEREO:
-			return SBC_MAX_BITPOOL_2_CHANNELS;
-		case SBC_CHANNEL_MODE_MONO:
-			return SBC_MAX_BITPOOL_1_CHANNEL;
-	}
+/* The actual bitpool is negociated during connexion. We don't used fixed capabilities, 
+ * so the device cap is never exceeded. The following values are PA internal limits.
+ */  
+    switch (mode) {
+        case SBC_CHANNEL_MODE_MONO:
+            return SBC_MAX_BITPOOL_MONO;
+        case SBC_CHANNEL_MODE_DUAL_CHANNEL:
+            return SBC_MAX_BITPOOL_DUAL_CHANNEL;
+        case SBC_CHANNEL_MODE_STEREO:
+        case SBC_CHANNEL_MODE_JOINT_STEREO:
+            return SBC_MAX_BITPOOL_STEREO;
+    }
 
     pa_assert_not_reached();
 }
@@ -215,25 +265,73 @@ static uint8_t fill_preferred_configuration(const pa_sample_spec *default_sample
 
     pa_assert((unsigned) i < PA_ELEMENTSOF(freq_table));
 
-    if (default_sample_spec->channels <= 1) {
-        if (capabilities->channel_mode & SBC_CHANNEL_MODE_MONO)
-            config->channel_mode = SBC_CHANNEL_MODE_MONO;
-        else {
-            pa_log_error("No supported channel modes");
-            return 0;
-        }
-    } else {
-        if (capabilities->channel_mode & SBC_CHANNEL_MODE_DUAL_CHANNEL)
-            config->channel_mode = SBC_CHANNEL_MODE_DUAL_CHANNEL;
-        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_JOINT_STEREO)
-            config->channel_mode = SBC_CHANNEL_MODE_JOINT_STEREO;
-        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_STEREO)
-            config->channel_mode = SBC_CHANNEL_MODE_STEREO;
-        else {
-            pa_log_error("No supported channel modes");
-            return 0;
-        }
-    }
+	if ( capabilities->max_bitpool <= (uint8_t) 53) {
+/* Devices that announce bitpool <= 53 are usually able to perform in DUAL CHANNEL, and therefore 
+ * We first try to use this mode with negociated max bitpool = 38 (aka SBC_MAX_BITPOOL_MONO) ~ 452kbps  
+ * to keep space for the protocol overhead. If the device doesn't support DUAL CHANNEL, then we will use 
+ * standard negociated max bitpool = 53 in STEREO or JOINT STEREO 
+ */
+	    if (default_sample_spec->channels <= 1) {
+	        if (capabilities->channel_mode & SBC_CHANNEL_MODE_MONO)
+	            config->channel_mode = SBC_CHANNEL_MODE_MONO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_JOINT_STEREO)
+	            config->channel_mode = SBC_CHANNEL_MODE_JOINT_STEREO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_STEREO)
+	            config->channel_mode = SBC_CHANNEL_MODE_STEREO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_DUAL_CHANNEL)
+	            config->channel_mode = SBC_CHANNEL_MODE_DUAL_CHANNEL;
+	        else {
+	            pa_log_error("No supported channel modes");
+	            return 0;
+	        }
+	    } else {
+	        if (capabilities->channel_mode & SBC_CHANNEL_MODE_DUAL_CHANNEL)
+	            config->channel_mode = SBC_CHANNEL_MODE_DUAL_CHANNEL;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_STEREO)
+	            config->channel_mode = SBC_CHANNEL_MODE_STEREO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_JOINT_STEREO)
+	            config->channel_mode = SBC_CHANNEL_MODE_JOINT_STEREO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_MONO)
+	            config->channel_mode = SBC_CHANNEL_MODE_MONO;
+	        else {
+	            pa_log_error("No supported channel modes");
+	            return 0;
+	        }
+	    }
+	} else {
+/* Devices that announce bitpool > 53 are usually able to perform high bitpool in STEREO MODE. Therefore 
+ * we first try STEREO MODE with negociated highest bitpool (aka SBC_MAX_BITPOOL_STEREO). These high end 
+ * devices are designed to work at high bitpool so we leave to them to take care of protocol overhead.
+ */
+	    if (default_sample_spec->channels <= 1) {
+	        if (capabilities->channel_mode & SBC_CHANNEL_MODE_MONO)
+	            config->channel_mode = SBC_CHANNEL_MODE_MONO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_JOINT_STEREO)
+	            config->channel_mode = SBC_CHANNEL_MODE_JOINT_STEREO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_STEREO)
+	            config->channel_mode = SBC_CHANNEL_MODE_STEREO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_DUAL_CHANNEL)
+	            config->channel_mode = SBC_CHANNEL_MODE_DUAL_CHANNEL;
+	        else {
+	            pa_log_error("No supported channel modes");
+	            return 0;
+	        }
+	    } else {
+	        if (capabilities->channel_mode & SBC_CHANNEL_MODE_STEREO)
+	            config->channel_mode = SBC_CHANNEL_MODE_STEREO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_JOINT_STEREO)
+	            config->channel_mode = SBC_CHANNEL_MODE_JOINT_STEREO;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_DUAL_CHANNEL)
+	            config->channel_mode = SBC_CHANNEL_MODE_DUAL_CHANNEL;
+	        else if (capabilities->channel_mode & SBC_CHANNEL_MODE_MONO)
+	            config->channel_mode = SBC_CHANNEL_MODE_MONO;
+	        else {
+	            pa_log_error("No supported channel modes");
+	            return 0;
+	        }
+	    }
+	}
+	
 
     if (capabilities->block_length & SBC_BLOCK_LENGTH_16)
         config->block_length = SBC_BLOCK_LENGTH_16;
@@ -265,7 +363,7 @@ static uint8_t fill_preferred_configuration(const pa_sample_spec *default_sample
         pa_log_error("No supported allocation method");
         return 0;
     }
-    // Negociation with remote capabilities
+
     config->min_bitpool = (uint8_t) PA_MAX(SBC_MIN_BITPOOL, capabilities->min_bitpool);
     config->max_bitpool = (uint8_t) PA_MIN(default_bitpool(config->frequency, config->channel_mode), capabilities->max_bitpool);
 
@@ -310,53 +408,53 @@ static void *init(bool for_encoding, bool for_backchannel, const uint8_t *config
     sample_spec->format = PA_SAMPLE_S16LE;
 
     switch (config->frequency) {
-        case SBC_SAMPLING_FREQ_48000:
-            sbc_info->frequency = SBC_FREQ_48000;
-            sample_spec->rate = 48000U;
-            break;
-        case SBC_SAMPLING_FREQ_44100:
-            sbc_info->frequency = SBC_FREQ_44100;
-            sample_spec->rate = 44100U;
+        case SBC_SAMPLING_FREQ_16000:
+            sbc_info->frequency = SBC_FREQ_16000;
+            sample_spec->rate = 16000U;
             break;
         case SBC_SAMPLING_FREQ_32000:
             sbc_info->frequency = SBC_FREQ_32000;
             sample_spec->rate = 32000U;
             break;
-        case SBC_SAMPLING_FREQ_16000:
-            sbc_info->frequency = SBC_FREQ_16000;
-            sample_spec->rate = 16000U;
+        case SBC_SAMPLING_FREQ_44100:
+            sbc_info->frequency = SBC_FREQ_44100;
+            sample_spec->rate = 44100U;
+            break;
+        case SBC_SAMPLING_FREQ_48000:
+            sbc_info->frequency = SBC_FREQ_48000;
+            sample_spec->rate = 48000U;
             break;
         default:
             pa_assert_not_reached();
     }
 
     switch (config->channel_mode) {
+        case SBC_CHANNEL_MODE_MONO:
+            sbc_info->mode = SBC_MODE_MONO;
+            sample_spec->channels = 1;
+            break;
         case SBC_CHANNEL_MODE_DUAL_CHANNEL:
             sbc_info->mode = SBC_MODE_DUAL_CHANNEL;
-            sample_spec->channels = 2;
-            break;
-        case SBC_CHANNEL_MODE_JOINT_STEREO:
-            sbc_info->mode = SBC_MODE_JOINT_STEREO;
             sample_spec->channels = 2;
             break;
         case SBC_CHANNEL_MODE_STEREO:
             sbc_info->mode = SBC_MODE_STEREO;
             sample_spec->channels = 2;
             break;
-        case SBC_CHANNEL_MODE_MONO:
-            sbc_info->mode = SBC_MODE_MONO;
-            sample_spec->channels = 1;
+        case SBC_CHANNEL_MODE_JOINT_STEREO:
+            sbc_info->mode = SBC_MODE_JOINT_STEREO;
+            sample_spec->channels = 2;
             break;
         default:
             pa_assert_not_reached();
     }
 
     switch (config->allocation_method) {
-        case SBC_ALLOCATION_LOUDNESS:
-            sbc_info->allocation = SBC_AM_LOUDNESS;
-            break;
         case SBC_ALLOCATION_SNR:
             sbc_info->allocation = SBC_AM_SNR;
+            break;
+        case SBC_ALLOCATION_LOUDNESS:
+            sbc_info->allocation = SBC_AM_LOUDNESS;
             break;
         default:
             pa_assert_not_reached();
